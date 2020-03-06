@@ -1,0 +1,151 @@
+#!/bin/sh
+#|-*- mode:lisp -*-|#
+#|
+exec ros -Q -- $0 "$@"
+|#
+(progn ;;init forms
+  (ros:ensure-asdf)
+  #+quicklisp(ql:quickload '(:alexandria :str) :silent t)
+  )
+
+(defpackage :ros.script.sudoku.3792508253
+  (:use :cl :alexandria))
+(in-package :ros.script.sudoku.3792508253)
+
+
+(defun make-sudoku ()
+  "Returns an empty Sudoku board."
+  (make-array '(9 9)
+	      :element-type 'integer
+	      :initial-element 0))
+
+(defun remove-zeros (lst)
+  "Returns lst but with zero elements removed."
+  (remove-if (lambda (x)
+	       (= x 0))
+	     lst))
+
+(defun duplicate? (lst)
+  "Returns T if and only if there are non-zero duplicate elements in lst."
+  (let ((tmp (remove-zeros lst)))
+    (not (equalp tmp (remove-duplicates tmp)))))
+;; (duplicate? '(0 1 0 0 2 2))
+;; (duplicate? '(0 1 0 0 2))
+
+(defun get-row (sudoku row-id)
+  "Returns the elements in the given row of the puzzle."
+  (loop for i from 0 to 8
+     collect (aref sudoku row-id i)))
+
+(defun get-col (sudoku col-id)
+  "Returns the elements in the given column of the puzzle."
+  (loop for i from 0 to 8
+     collect (aref sudoku i col-id)))
+
+(defun get-block (sudoku i j)
+  "Returns the elements in the block with row index i and column index j.
+0 <= i, j < 3."
+  (let ((corner-row (* 3 i))
+	(corner-col (* 3 j)))
+    (loop for ri from corner-row to (+ corner-row 2)
+       nconc (loop for ci from corner-col to (+ corner-col 2)
+		  collect (aref sudoku ri ci)))))
+;; (get-block (make-sudoku) 1 1)
+
+(defun valid? (sudoku)
+  "Returns T if and only if the Sudoku puzzle state follows the rules."
+  (and (loop for i from 0 to 8
+	  never (duplicate? (get-row sudoku i)))
+       (loop for i from 0 to 8
+	  never (duplicate? (get-col sudoku i)))
+       (loop for i from 0 to 2
+	  always (loop for j from 0 to 2
+		    never (duplicate? (get-block sudoku i j))))))
+
+(defun complete? (sudoku)
+  "Returns T if and only if there are no blank cells in Sudoku puzzle."
+  (loop for i from 0 to 8
+     never (loop for j from 0 to 8
+	      thereis (= (aref sudoku i j) 0))))
+
+(defun sudoku (numbers)
+  "Returns a Sudoku array by filling in cells using the given numbers
+in row-major format."
+  (let ((sudoku2 (make-sudoku)))
+    (loop for i from 0 to 80
+       for val across numbers
+       do (setf (row-major-aref sudoku2 i) val))
+	sudoku2))
+
+(defun numbers (sudoku)
+  "Returns the numbers in the Sudoku array in row-major format."
+  (apply #'vector
+	 (loop for i from 0 to 8
+	    nconc (loop for j from 0 to 8
+		     collect (aref sudoku i j)))))
+;; (numbers (make-sudoku))
+
+;; Returns possible ways in which a given Sudoku array could be filled.
+(defun fill-blank (numbers)
+  (let ((first-blank
+	 (loop for i from 0 to 80
+	    for val across numbers
+	    if (= val 0)
+	    return i)))
+    ;; Fill the first blank space with numbers from 1 to 9
+    (loop for i from 1 to 9
+       for s = (let ((s (alexandria:copy-array numbers)))
+		 (setf (svref s first-blank) i)
+		 s)
+       if (valid? (sudoku s)) collect s)))
+
+(defun dfs (start goal? children)
+  "Depth first search from start vertex and returns when (funcall #'goal? vertex) is true
+or nil if no such vertex is found.
+Children is function that takes a vertex and returns the vertex's child vertices."
+  (let ((v nil)
+	(S (list start)))
+    (loop do
+	 (progn
+	   (setf v (pop S))
+	   (if (funcall goal? v)
+	       (return v)
+	       (let ((cs (funcall children v)))
+		 (loop for c in cs do
+		      (push c S)))))
+       until (not S))))
+
+(defun solve (s)
+  "Tries to find a solution that completes the Sudoku puzzle."
+  (dfs s (lambda (x)
+	   (funcall #'complete? (sudoku x)))
+       #'fill-blank))
+
+(defun read-sudoku (filename)
+  "Reads a file and returns its contents as a vector of values."
+  (apply #'vector
+	 (apply #'append
+		(mapcar (lambda (x)
+			  (mapcar (lambda (item)
+				    (let ((num (parse-integer
+						item :junk-allowed t)))
+				      (if num num 0)))
+				  (str:split "," x)))
+			(str:lines
+			 (alexandria:read-file-into-string filename))))))
+;; (fill-blank (read-sudoku "sudoku.txt"))
+
+(defun print-sudoku (values)
+  "Prints a vector of values as a Sudoku board."
+  (loop for i from 0 to 8 do
+       (progn
+	 (loop for j from 0 to 8 do
+	      (format t "~2d" (svref values (+ (* i 9) j))))
+	 (terpri))))
+
+;; Open the Sudoku puzzle input file, solve it, and print the solution.
+(defun main (input-file &rest argv)
+  (declare (ignorable argv))
+  (print-sudoku
+   (solve (read-sudoku input-file))))
+;;; vim: set ft=lisp lisp:
